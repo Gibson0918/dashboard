@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Data Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.1.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Excel Data Dashboard</h1>
+            <p>Interactive visualizations with dynamic filtering</p>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-value">${{ "%.2f"|format(total_sales) }}</div>
+                <div class="stat-label">Total Sales</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${{ "%.2f"|format(total_profit) }}</div>
+                <div class="stat-label">Total Profit</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">${{ "%.2f"|format(avg_sales) }}</div>
+                <div class="stat-label">Average Sales</div>
+            </div>
+        </div>
+
+        <!-- Enhanced Data Preview -->
+        <div class="data-preview">
+            <h2>Data Preview ({{ total_rows }} rows × {{ total_columns }} columns)</h2>
+            <div class="data-info">
+                <p><strong>Showing first 20 rows of {{ total_rows }} total rows</strong></p>
+                <p><strong>Columns ({{ total_columns }}):</strong> {{ column_names|join(', ') }}</p>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for column in column_names %}
+                                <th title="{{ column }}">{{ column }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data_preview %}
+                            <tr>
+                                {% for column in column_names %}
+                                    <td title="{{ row[column] }}">
+                                        {% if row[column] is string %}
+                                            {{ row[column][:50] }}{% if row[column]|length > 50 %}...{% endif %}
+                                        {% else %}
+                                            {{ row[column] }}
+                                        {% endif %}
+                                    </td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Charts with Filters -->
+        <div class="charts-grid">
+            <!-- Grouped Stacked Bar Chart -->
+            <div class="chart-container">
+                <h3>Grouped Stacked Bar Chart</h3>
+                <div class="chart-controls">
+                    <div class="filter-group">
+                        <label>X-Axis:</label>
+                        <select id="bar-x-axis">
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Quarter' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Y-Axis:</label>
+                        <select id="bar-y-axis">
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}" {% if column == 'Sales' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Stack By:</label>
+                        <select id="bar-stack-by">
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Subcategory' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Group By:</label>
+                        <select id="bar-group-by">
+                            <option value="None">None</option>
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Category' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <button onclick="updateChart('grouped_bar')">Update Chart</button>
+                    </div>
+                </div>
+                <div class="loading" id="loading-bar">Updating chart...</div>
+                <div class="chart-wrapper" id="grouped-bar-chart">
+                    {% if grouped_bar_chart %}
+                        {{ grouped_bar_chart|safe }}
+                    {% else %}
+                        <div class="chart-placeholder">Select filters and click "Update Chart" to generate visualization</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Line Chart -->
+            <div class="chart-container">
+                <h3>Line Chart</h3>
+                <div class="chart-controls">
+                    <div class="filter-group">
+                        <label>X-Axis:</label>
+                        <select id="line-x-axis">
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Quarter' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Y-Axis:</label>
+                        <select id="line-y-axis">
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}" {% if column == 'Sales' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Color By:</label>
+                        <select id="line-color-by">
+                            <option value="None">None</option>
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Category' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <button onclick="updateChart('line')">Update Chart</button>
+                    </div>
+                </div>
+                <div class="loading" id="loading-line">Updating chart...</div>
+                <div class="chart-wrapper" id="line-chart">
+                    {% if line_chart %}
+                        {{ line_chart|safe }}
+                    {% else %}
+                        <div class="chart-placeholder">Select filters and click "Update Chart" to generate visualization</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Pie Chart -->
+            <div class="chart-container">
+                <h3>Pie Chart</h3>
+                <div class="chart-controls">
+                    <div class="filter-group">
+                        <label>Category:</label>
+                        <select id="pie-category">
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Category' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Value:</label>
+                        <select id="pie-value">
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}" {% if column == 'Sales' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <button onclick="updateChart('pie')">Update Chart</button>
+                        <button onclick="testPieChart()" style="background: #28a745;">Test Pie</button>
+                        <button onclick="debugPieChart()" style="background: #ffc107; color: black;">Debug Pie</button>
+                    </div>
+                </div>
+                <div class="loading" id="loading-pie">Updating chart...</div>
+                <div class="chart-wrapper" id="pie-chart">
+                    {% if pie_chart %}
+                        {{ pie_chart|safe }}
+                    {% else %}
+                        <div class="chart-placeholder">Select filters and click "Update Chart" to generate visualization</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Scatter Plot -->
+            <div class="chart-container">
+                <h3>Scatter Plot</h3>
+                <div class="chart-controls">
+                    <div class="filter-group">
+                        <label>X-Axis:</label>
+                        <select id="scatter-x-axis">
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}" {% if column == 'Sales' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Y-Axis:</label>
+                        <select id="scatter-y-axis">
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}" {% if column == 'Profit' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Color By:</label>
+                        <select id="scatter-color-by">
+                            <option value="None">None</option>
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Category' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Size By:</label>
+                        <select id="scatter-size-by">
+                            <option value="None">None</option>
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}">{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <button onclick="updateChart('scatter')">Update Chart</button>
+                    </div>
+                </div>
+                <div class="loading" id="loading-scatter">Updating chart...</div>
+                <div class="chart-wrapper" id="scatter-plot">
+                    {% if scatter_plot %}
+                        {{ scatter_plot|safe }}
+                    {% else %}
+                        <div class="chart-placeholder">Select filters and click "Update Chart" to generate visualization</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Heatmap -->
+            <div class="chart-container">
+                <h3>Heatmap</h3>
+                <div class="chart-controls">
+                    <div class="filter-group">
+                        <label>X-Axis:</label>
+                        <select id="heatmap-x-axis">
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Region' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Y-Axis:</label>
+                        <select id="heatmap-y-axis">
+                            {% for column in categorical_columns %}
+                                <option value="{{ column }}" {% if column == 'Category' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <label>Value:</label>
+                        <select id="heatmap-value">
+                            {% for column in numeric_columns %}
+                                <option value="{{ column }}" {% if column == 'Sales' %}selected{% endif %}>{{ column }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <button onclick="updateChart('heatmap')">Update Chart</button>
+                    </div>
+                </div>
+                <div class="loading" id="loading-heatmap">Updating chart...</div>
+                <div class="chart-wrapper" id="heatmap">
+                    {% if heatmap %}
+                        {{ heatmap|safe }}
+                    {% else %}
+                        <div class="chart-placeholder">Select filters and click "Update Chart" to generate visualization</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateChart(chartType) {
+            console.log('=== STARTING CHART UPDATE ===');
+            console.log('Chart type:', chartType);
+            
+            const elementMap = {
+                'grouped_bar': { loading: 'loading-bar', chart: 'grouped-bar-chart' },
+                'line': { loading: 'loading-line', chart: 'line-chart' },
+                'pie': { loading: 'loading-pie', chart: 'pie-chart' },
+                'scatter': { loading: 'loading-scatter', chart: 'scatter-plot' },
+                'heatmap': { loading: 'loading-heatmap', chart: 'heatmap' }
+            };
+            
+            const elements = elementMap[chartType];
+            const loadingElement = document.getElementById(elements.loading);
+            const chartElement = document.getElementById(elements.chart);
+            
+            if (!loadingElement || !chartElement) {
+                console.error('Could not find chart elements for:', chartType);
+                return;
+            }
+            
+            loadingElement.style.display = 'block';
+            chartElement.style.opacity = '0.5';
+            
+            let filters = {};
+            switch(chartType) {
+                case 'grouped_bar':
+                    filters = { 
+                        x_axis: document.getElementById('bar-x-axis').value, 
+                        y_axis: document.getElementById('bar-y-axis').value, 
+                        stack_by: document.getElementById('bar-stack-by').value, 
+                        group_by: document.getElementById('bar-group-by').value 
+                    };
+                    break;
+                case 'line':
+                    filters = { 
+                        x_axis: document.getElementById('line-x-axis').value, 
+                        y_axis: document.getElementById('line-y-axis').value, 
+                        color_by: document.getElementById('line-color-by').value 
+                    };
+                    break;
+                case 'pie':
+                    const categorySelect = document.getElementById('pie-category');
+                    const valueSelect = document.getElementById('pie-value');
+                    filters = { 
+                        category: categorySelect.value, 
+                        value: valueSelect.value 
+                    };
+                    console.log('Pie chart filters - Category:', categorySelect.value, 'Value:', valueSelect.value);
+                    console.log('Pie chart options - Selected category:', categorySelect.options[categorySelect.selectedIndex].text);
+                    console.log('Pie chart options - Selected value:', valueSelect.options[valueSelect.selectedIndex].text);
+                    break;
+                case 'scatter':
+                    filters = { 
+                        x_axis: document.getElementById('scatter-x-axis').value, 
+                        y_axis: document.getElementById('scatter-y-axis').value, 
+                        color_by: document.getElementById('scatter-color-by').value,
+                        size_by: document.getElementById('scatter-size-by').value 
+                    };
+                    break;
+                case 'heatmap':
+                    filters = { 
+                        x_axis: document.getElementById('heatmap-x-axis').value, 
+                        y_axis: document.getElementById('heatmap-y-axis').value, 
+                        value: document.getElementById('heatmap-value').value 
+                    };
+                    break;
+            }
+            
+            console.log('Sending request with filters:', filters);
+            
+            fetch('/update_chart', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({chart_type: chartType, filters: filters})
+            })
+            .then(response => {
+                console.log('Response status:', response.status, response.statusText);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('=== SERVER RESPONSE ===');
+                console.log('Success:', data.success);
+                console.log('Has chart HTML:', !!data.chart_html);
+                console.log('Chart HTML length:', data.chart_html?.length);
+                if (data.error) {
+                    console.error('Server error:', data.error);
+                }
+                
+                if (data.success && data.chart_html) {
+                    console.log('Updating chart element with new HTML...');
+                    // Clear previous content
+                    chartElement.innerHTML = data.chart_html;
+                    
+                    // Special handling for pie chart
+                    if (chartType === 'pie') {
+                        console.log('Pie chart specific debugging:');
+                        setTimeout(() => {
+                            const plotlyDivs = chartElement.querySelectorAll('.js-plotly-plot, .plotly-graph-div');
+                            console.log('Found Plotly divs in pie chart:', plotlyDivs.length);
+                            plotlyDivs.forEach((div, index) => {
+                                console.log(`Pie chart div ${index}:`, {
+                                    width: div.offsetWidth,
+                                    height: div.offsetHeight,
+                                    classes: div.className,
+                                    id: div.id
+                                });
+                            });
+                            
+                            if (plotlyDivs.length === 0) {
+                                console.warn('No Plotly divs found in pie chart container!');
+                                console.log('Actual content (first 1000 chars):', chartElement.innerHTML.substring(0, 1000));
+                            }
+                        }, 100);
+                    }
+                    
+                    // Initialize Plotly charts after insertion
+                    setTimeout(() => {
+                        initializePlotlyCharts(chartElement, chartType);
+                    }, 150);
+                    
+                } else {
+                    const errorMsg = data.error || 'Unknown error occurred';
+                    console.error('Chart update failed:', errorMsg);
+                    chartElement.innerHTML = `<div class="chart-placeholder" style="color:red;">Error: ${errorMsg}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('=== FETCH ERROR ===');
+                console.error('Error:', error);
+                console.error('Error message:', error.message);
+                chartElement.innerHTML = `<div class="chart-placeholder" style="color:red;">Network Error: ${error.message}</div>`;
+            })
+            .finally(() => {
+                loadingElement.style.display = 'none';
+                chartElement.style.opacity = '1';
+                console.log('=== CHART UPDATE COMPLETED ===');
+            });
+        }
+        
+        function initializePlotlyCharts(container, chartType = '') {
+            console.log(`Initializing Plotly charts for ${chartType}...`);
+            
+            // Look for Plotly chart divs
+            const plotlyDivs = container.querySelectorAll('.js-plotly-plot, .plotly-graph-div, [data-plotly]');
+            console.log('Found Plotly divs:', plotlyDivs.length);
+            
+            plotlyDivs.forEach((div, index) => {
+                console.log(`Processing Plotly div ${index}:`, {
+                    tagName: div.tagName,
+                    id: div.id,
+                    classes: div.className,
+                    width: div.offsetWidth,
+                    height: div.offsetHeight
+                });
+                
+                // Ensure the div has proper dimensions
+                if (!div.style.height || div.style.height === 'auto') {
+                    div.style.height = '100%';
+                    div.style.minHeight = '400px';
+                }
+                if (!div.style.width || div.style.width === 'auto') {
+                    div.style.width = '100%';
+                }
+                
+                // Try to resize if Plotly is available
+                if (typeof Plotly !== 'undefined') {
+                    try {
+                        Plotly.Plots.resize(div);
+                        console.log(`Resized Plotly chart ${index}`);
+                    } catch (error) {
+                        console.log(`Error resizing Plotly chart ${index}:`, error);
+                    }
+                }
+            });
+            
+            // Check for script tags
+            const scripts = container.querySelectorAll('script');
+            let executedScripts = 0;
+            scripts.forEach((script, index) => {
+                if (script.textContent.includes('Plotly') || script.textContent.includes('plotly')) {
+                    console.log(`Found Plotly script ${index}`);
+                    executedScripts++;
+                    try {
+                        eval(script.textContent);
+                        console.log(`Executed Plotly script ${index} successfully`);
+                    } catch (error) {
+                        console.log(`Error executing script ${index}:`, error);
+                    }
+                }
+            });
+            
+            console.log(`Executed ${executedScripts} Plotly scripts`);
+            
+            // If nothing found, log the issue
+            if (plotlyDivs.length === 0 && executedScripts === 0) {
+                console.warn('No Plotly elements or scripts found in container!');
+                console.log('Container innerHTML length:', container.innerHTML.length);
+            }
+        }
+
+        // Test function for pie chart debugging
+        function testPieChart() {
+            console.log('=== TESTING PIE CHART ===');
+            
+            const chartElement = document.getElementById('pie-chart');
+            const loadingElement = document.getElementById('loading-pie');
+            const categorySelect = document.getElementById('pie-category');
+            const valueSelect = document.getElementById('pie-value');
+            
+            console.log('Current selections - Category:', categorySelect.value, 'Value:', valueSelect.value);
+            
+            loadingElement.style.display = 'block';
+            chartElement.style.opacity = '0.5';
+            
+            // Create a simple test pie chart directly
+            const testData = [{
+                values: [35, 25, 20, 20, 15],
+                labels: ['Region A', 'Region B', 'Region C', 'Region D', 'Region E'],
+                type: 'pie',
+                hoverinfo: 'label+percent+value',
+                textinfo: 'percent',
+                textposition: 'inside',
+                hole: 0.3
+            }];
+            
+            const testLayout = {
+                height: 450,
+                showlegend: true,
+                title: `Test Pie: ${valueSelect.value} by ${categorySelect.value}`,
+                margin: { t: 50, b: 50, l: 50, r: 50 }
+            };
+            
+            const config = {
+                responsive: true,
+                displayModeBar: true
+            };
+            
+            // Clear and create new plot
+            chartElement.innerHTML = '';
+            Plotly.newPlot(chartElement, testData, testLayout, config)
+                .then(() => {
+                    console.log('Test pie chart created successfully');
+                    loadingElement.style.display = 'none';
+                    chartElement.style.opacity = '1';
+                })
+                .catch(error => {
+                    console.error('Error creating test pie chart:', error);
+                    chartElement.innerHTML = `<div class="chart-placeholder" style="color:red;">Test Error: ${error.message}</div>`;
+                    loadingElement.style.display = 'none';
+                    chartElement.style.opacity = '1';
+                });
+        }
+
+        // Debug function to check current state
+        function debugPieChart() {
+            console.log('=== PIE CHART DEBUG INFO ===');
+            const categorySelect = document.getElementById('pie-category');
+            const valueSelect = document.getElementById('pie-value');
+            const chartElement = document.getElementById('pie-chart');
+            
+            console.log('Current selections:');
+            console.log('- Category:', categorySelect.value, `(${categorySelect.options[categorySelect.selectedIndex].text})`);
+            console.log('- Value:', valueSelect.value, `(${valueSelect.options[valueSelect.selectedIndex].text})`);
+            
+            console.log('Available categories:');
+            Array.from(categorySelect.options).forEach(opt => {
+                console.log(`  - ${opt.value} (${opt.text}) ${opt.selected ? '[SELECTED]' : ''}`);
+            });
+            
+            console.log('Available values:');
+            Array.from(valueSelect.options).forEach(opt => {
+                console.log(`  - ${opt.value} (${opt.text}) ${opt.selected ? '[SELECTED]' : ''}`);
+            });
+            
+            console.log('Chart element state:');
+            console.log('- innerHTML length:', chartElement.innerHTML.length);
+            console.log('- children count:', chartElement.children.length);
+            
+            const plotlyDivs = chartElement.querySelectorAll('.js-plotly-plot, .plotly-graph-div');
+            console.log('- Plotly divs found:', plotlyDivs.length);
+        }
+
+        // Initialize any existing charts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('=== PAGE LOADED ===');
+            console.log('Plotly version:', typeof Plotly !== 'undefined' ? Plotly.version : 'Not loaded');
+            
+            // Initialize all chart containers
+            document.querySelectorAll('.chart-wrapper').forEach(container => {
+                initializePlotlyCharts(container);
+            });
+            
+            // Additional resize after a delay to ensure everything is rendered
+            setTimeout(() => {
+                if (typeof Plotly !== 'undefined') {
+                    document.querySelectorAll('.js-plotly-plot, .plotly-graph-div').forEach(plot => {
+                        try {
+                            Plotly.Plots.resize(plot);
+                        } catch (error) {
+                            console.log('Error in initial resize:', error);
+                        }
+                    });
+                }
+            }, 2000);
+        });
+
+        // Also handle window resize
+        window.addEventListener('resize', function() {
+            if (typeof Plotly !== 'undefined') {
+                document.querySelectorAll('.js-plotly-plot, .plotly-graph-div').forEach(plot => {
+                    try {
+                        Plotly.Plots.resize(plot);
+                    } catch (error) {
+                        console.log('Error in resize handler:', error);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
