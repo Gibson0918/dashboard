@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -8,6 +8,8 @@ import os
 import numpy as np
 from datetime import datetime, timedelta
 import random
+from io import BytesIO
+import csv
 
 app = Flask(__name__)
 
@@ -419,6 +421,14 @@ def index():
     categorical_columns = df.select_dtypes(include=['object', 'category']).columns.tolist()
     all_columns = df.columns.tolist()
     
+    # Get unique values for categorical columns (for dropdowns)
+    unique_values = {}
+    for column in categorical_columns:
+        unique_values[column] = df[column].dropna().unique().tolist()[:100]  # Limit to 100 values
+    
+    # Calculate total pages for pagination
+    total_pages = (len(df) + 19) // 20  # 20 rows per page
+    
     # Create visualizations with default parameters
     grouped_bar_chart = create_grouped_stacked_bar_chart(
         df, 
@@ -479,8 +489,10 @@ def index():
         numeric_columns=numeric_columns,
         categorical_columns=categorical_columns,
         all_columns=all_columns,
+        unique_values=unique_values,
         total_rows=len(df),
-        total_columns=len(df.columns)
+        total_columns=len(df.columns),
+        total_pages=total_pages
     )
 
 @app.route('/update_chart', methods=['POST'])
@@ -545,6 +557,216 @@ def update_chart():
     
     except Exception as e:
         print(f"Error in update_chart: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/filter_data', methods=['POST'])
+def filter_data():
+    """Filter data based on user criteria"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No JSON data received'})
+        
+        filters = data.get('filters', {})
+        page = data.get('page', 1)
+        page_size = data.get('page_size', 20)
+        
+        print(f"=== FILTER REQUEST ===")
+        print(f"Filters: {filters}")
+        print(f"Page: {page}, Page size: {page_size}")
+        
+        df = load_data()
+        filtered_df = df.copy()
+        
+        # Apply filters
+        for column, filter_config in filters.items():
+            if column not in df.columns:
+                continue
+                
+            if filter_config['type'] == 'categorical':
+                # Categorical filter (multiple selection)
+                values = filter_config['values']
+                if values:
+                    filtered_df = filtered_df[filtered_df[column].isin(values)]
+                    
+            elif filter_config['type'] == 'numeric':
+                # Numeric filter with operators
+                operator = filter_config['operator']
+                value = filter_config['value']
+                
+                if operator == '=':
+                    filtered_df = filtered_df[filtered_df[column] == value]
+                elif operator == '>':
+                    filtered_df = filtered_df[filtered_df[column] > value]
+                elif operator == '<':
+                    filtered_df = filtered_df[filtered_df[column] < value]
+                elif operator == '>=':
+                    filtered_df = filtered_df[filtered_df[column] >= value]
+                elif operator == '<=':
+                    filtered_df = filtered_df[filtered_df[column] <= value]
+                elif operator == '!=':
+                    filtered_df = filtered_df[filtered_df[column] != value]
+        
+        # Calculate pagination
+        total_filtered_rows = len(filtered_df)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_df = filtered_df.iloc[start_idx:end_idx]
+        
+        # Convert to dictionary for JSON response
+        filtered_data = paginated_df.to_dict('records')
+        
+        print(f"Filtered data: {total_filtered_rows} rows found")
+        
+        return jsonify({
+            'success': True,
+            'filtered_data': filtered_data,
+            'total_filtered_rows': total_filtered_rows,
+            'current_page': page,
+            'total_pages': (total_filtered_rows + page_size - 1) // page_size
+        })
+        
+    except Exception as e:
+        print(f"Error in filter_data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/export_data', methods=['POST'])
+def export_data():
+    """Export filtered data to Excel or CSV file"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No JSON data received'})
+        
+        filters = data.get('filters', {})
+        export_format = data.get('format', 'excel')
+        
+        print(f"=== EXPORT REQUEST ===")
+        print(f"Filters: {filters}")
+        print(f"Format: {export_format}")
+        
+        df = load_data()
+        filtered_df = df.copy()
+        
+        # Apply the same filters as in filter_data
+        for column, filter_config in filters.items():
+            if column not in df.columns:
+                continue
+                
+            if filter_config['type'] == 'categorical':
+                # Categorical filter (multiple selection)
+                values = filter_config['values']
+                if values:
+                    filtered_df = filtered_df[filtered_df[column].isin(values)]
+                    
+            elif filter_config['type'] == 'numeric':
+                # Numeric filter with operators
+                operator = filter_config['operator']
+                value = filter_config['value']
+                
+                if operator == '=':
+                    filtered_df = filtered_df[filtered_df[column] == value]
+                elif operator == '>':
+                    filtered_df = filtered_df[filtered_df[column] > value]
+                elif operator == '<':
+                    filtered_df = filtered_df[filtered_df[column] < value]
+                elif operator == '>=':
+                    filtered_df = filtered_df[filtered_df[column] >= value]
+                elif operator == '<=':
+                    filtered_df = filtered_df[filtered_df[column] <= value]
+                elif operator == '!=':
+                    filtered_df = filtered_df[filtered_df[column] != value]
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        if export_format == 'csv':
+            # Create CSV file in memory
+            output = BytesIO()
+            
+            # Write CSV data
+            filtered_df.to_csv(output, index=False, encoding='utf-8')
+            output.seek(0)
+            
+            filename = f"filtered_data_export_{timestamp}.csv"
+            
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='text/csv'
+            )
+            
+        else:  # Excel format
+            # Create Excel file in memory
+            output = BytesIO()
+            
+            # Create Excel writer
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # Write filtered data to first sheet
+                filtered_df.to_excel(writer, sheet_name='Filtered Data', index=False)
+                
+                # Create a summary sheet with filter information
+                summary_data = {
+                    'Export Information': [
+                        f'Export Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+                        f'Total Rows: {len(filtered_df)}',
+                        f'Original Rows: {len(df)}',
+                        f'Filtered Percentage: {len(filtered_df)/len(df)*100:.1f}%',
+                        '',
+                        'Applied Filters:'
+                    ]
+                }
+                
+                # Add filter details
+                if filters:
+                    for column, filter_config in filters.items():
+                        if filter_config['type'] == 'categorical':
+                            summary_data['Export Information'].append(
+                                f"{column}: {', '.join(filter_config['values'])}"
+                            )
+                        elif filter_config['type'] == 'numeric':
+                            summary_data['Export Information'].append(
+                                f"{column} {filter_config['operator']} {filter_config['value']}"
+                            )
+                else:
+                    summary_data['Export Information'].append('No filters applied')
+                
+                # Create summary DataFrame
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='Export Summary', index=False)
+                
+                # Auto-adjust column widths
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)
+                        worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # Prepare file for download
+            output.seek(0)
+            filename = f"filtered_data_export_{timestamp}.xlsx"
+            
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+        
+    except Exception as e:
+        print(f"Error in export_data: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)})

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Excel Data Dashboard</title>
     <script src="https://cdn.plot.ly/plotly-2.27.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -28,17 +29,73 @@
                 <div class="stat-value">${{ "%.2f"|format(avg_sales) }}</div>
                 <div class="stat-label">Average Sales</div>
             </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ total_rows }}</div>
+                <div class="stat-label">Total Records</div>
+            </div>
         </div>
 
-        <!-- Enhanced Data Preview -->
+        <!-- Enhanced Data Preview with Excel-like Filters -->
         <div class="data-preview">
             <h2>Data Preview ({{ total_rows }} rows × {{ total_columns }} columns)</h2>
-            <div class="data-info">
-                <p><strong>Showing first 20 rows of {{ total_rows }} total rows</strong></p>
-                <p><strong>Columns ({{ total_columns }}):</strong> {{ column_names|join(', ') }}</p>
+            
+            <!-- Filter Controls -->
+            <div class="filter-controls">
+                <div class="filter-header">
+                    <h3>Excel-style Column Filters</h3>
+                    <div class="filter-actions">
+                        <button onclick="applyAllFilters()" class="btn-primary">Apply All Filters</button>
+                        <button onclick="clearAllFilters()" class="btn-secondary">Clear All Filters</button>
+                        <button onclick="exportFilteredData()" class="btn-success">Export Filtered Data</button>
+                    </div>
+                </div>
+                
+                <!-- Dynamic Filter Inputs -->
+                <div class="column-filters" id="column-filters">
+                    <div class="filters-row">
+                        {% for column in column_names %}
+                        <div class="filter-cell">
+                            <label>{{ column }}</label>
+                            <div class="filter-input-group">
+                                {% if column in categorical_columns %}
+                                    <!-- Dropdown for categorical columns -->
+                                    <select class="column-filter" data-column="{{ column }}" multiple size="3" title="Hold Ctrl to select multiple values">
+                                        <option value="">All Values</option>
+                                        {% for value in unique_values.get(column, []) %}
+                                        <option value="{{ value }}">{{ value[:30] }}{% if value|length > 30 %}...{% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                {% else %}
+                                    <!-- Input for numeric columns -->
+                                    <div class="numeric-filters">
+                                        <select class="numeric-operator" data-column="{{ column }}">
+                                            <option value="=">=</option>
+                                            <option value=">">></option>
+                                            <option value="<"><</option>
+                                            <option value=">=">>=</option>
+                                            <option value="<="><=</option>
+                                            <option value="!=">!=</option>
+                                        </select>
+                                        <input type="text" class="numeric-filter" data-column="{{ column }}" placeholder="Value" title="Enter numeric value">
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
             </div>
+
+            <!-- Data Table -->
+            <div class="data-info">
+                <div class="data-info-content">
+                    <p><strong id="filtered-info">Showing first 20 rows of {{ total_rows }} total rows</strong></p>
+                    <p><strong>Columns ({{ total_columns }}):</strong> {{ column_names|join(', ') }}</p>
+                </div>
+            </div>
+            
             <div class="table-container">
-                <table>
+                <table id="data-table">
                     <thead>
                         <tr>
                             {% for column in column_names %}
@@ -46,7 +103,7 @@
                             {% endfor %}
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="data-table-body">
                         {% for row in data_preview %}
                             <tr>
                                 {% for column in column_names %}
@@ -62,6 +119,19 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Pagination Controls -->
+            <div class="pagination-controls">
+                <button onclick="previousPage()" id="prev-btn" disabled>Previous</button>
+                <span id="page-info">Page 1 of {{ total_pages }}</span>
+                <button onclick="nextPage()" id="next-btn">Next</button>
+                <select id="page-size" onchange="changePageSize()">
+                    <option value="20">20 rows</option>
+                    <option value="50">50 rows</option>
+                    <option value="100">100 rows</option>
+                    <option value="200">200 rows</option>
+                </select>
             </div>
         </div>
 
@@ -277,7 +347,230 @@
         </div>
     </div>
 
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading">
+        Processing... Please wait.
+    </div>
+
     <script>
+        // Filter state management
+        let currentFilters = {};
+        let currentPage = 1;
+        let pageSize = 20;
+        let totalFilteredRows = {{ total_rows }};
+        let totalPages = Math.ceil({{ total_rows }} / pageSize);
+
+        // Initialize filters
+        function initializeFilters() {
+            document.querySelectorAll('.column-filter, .numeric-filter').forEach(input => {
+                input.addEventListener('change', updateFilterState);
+            });
+            document.querySelectorAll('.numeric-operator').forEach(select => {
+                select.addEventListener('change', updateFilterState);
+            });
+        }
+
+        // Update filter state
+        function updateFilterState() {
+            const column = this.dataset.column;
+            
+            if (this.classList.contains('column-filter')) {
+                // Categorical filter
+                const selectedValues = Array.from(this.selectedOptions).map(opt => opt.value);
+                if (selectedValues.length === 0 || (selectedValues.length === 1 && selectedValues[0] === '')) {
+                    delete currentFilters[column];
+                } else {
+                    currentFilters[column] = {
+                        type: 'categorical',
+                        values: selectedValues.filter(v => v !== '')
+                    };
+                }
+            } else if (this.classList.contains('numeric-filter')) {
+                // Numeric filter
+                const operator = document.querySelector(`.numeric-operator[data-column="${column}"]`).value;
+                const value = this.value.trim();
+                
+                if (value === '') {
+                    delete currentFilters[column];
+                } else {
+                    currentFilters[column] = {
+                        type: 'numeric',
+                        operator: operator,
+                        value: parseFloat(value)
+                    };
+                }
+            }
+            
+            console.log('Current filters:', currentFilters);
+        }
+
+        // Apply all filters and refresh data
+        function applyAllFilters() {
+            currentPage = 1;
+            loadFilteredData();
+        }
+
+        // Clear all filters
+        function clearAllFilters() {
+            // Clear filter inputs
+            document.querySelectorAll('.column-filter').forEach(select => {
+                select.selectedIndex = 0;
+            });
+            document.querySelectorAll('.numeric-filter').forEach(input => {
+                input.value = '';
+            });
+            
+            // Clear filter state
+            currentFilters = {};
+            currentPage = 1;
+            
+            // Reload data without filters
+            loadFilteredData();
+        }
+
+        // Load filtered data from server
+        function loadFilteredData() {
+            const loadingElement = document.getElementById('data-table-body');
+            loadingElement.innerHTML = '<tr><td colspan="{{ total_columns }}" style="text-align: center; padding: 20px;">Loading filtered data...</td></tr>';
+            
+            fetch('/filter_data', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    filters: currentFilters,
+                    page: currentPage,
+                    page_size: pageSize
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateDataTable(data.filtered_data);
+                    totalFilteredRows = data.total_filtered_rows;
+                    totalPages = Math.ceil(totalFilteredRows / pageSize);
+                    updatePaginationInfo();
+                } else {
+                    alert('Error filtering data: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error filtering data: ' + error.message);
+            });
+        }
+
+        // Update the data table with filtered results
+        function updateDataTable(data) {
+            const tbody = document.getElementById('data-table-body');
+            const columnNames = {{ column_names | tojson }};
+            
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="{{ total_columns }}" style="text-align: center; padding: 20px;">No data matches the current filters</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            data.forEach(row => {
+                html += '<tr>';
+                columnNames.forEach(column => {
+                    const value = row[column];
+                    let displayValue = value;
+                    
+                    if (typeof value === 'string' && value.length > 50) {
+                        displayValue = value.substring(0, 50) + '...';
+                    }
+                    
+                    html += `<td title="${value}">${displayValue}</td>`;
+                });
+                html += '</tr>';
+            });
+            
+            tbody.innerHTML = html;
+        }
+
+        // Pagination functions
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadFilteredData();
+            }
+        }
+
+        function nextPage() {
+            if (currentPage < totalPages) {
+                currentPage++;
+                loadFilteredData();
+            }
+        }
+
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('page-size').value);
+            currentPage = 1;
+            totalPages = Math.ceil(totalFilteredRows / pageSize);
+            loadFilteredData();
+        }
+
+        function updatePaginationInfo() {
+            document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+            document.getElementById('prev-btn').disabled = currentPage === 1;
+            document.getElementById('next-btn').disabled = currentPage === totalPages;
+            
+            const startRow = ((currentPage - 1) * pageSize) + 1;
+            const endRow = Math.min(currentPage * pageSize, totalFilteredRows);
+            document.getElementById('filtered-info').textContent = 
+                `Showing ${startRow}-${endRow} of ${totalFilteredRows} filtered rows ({{ total_rows }} total rows)`;
+        }
+
+        // Export filtered data
+        function exportFilteredData() {
+            showLoading();
+            
+            fetch('/export_data', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    filters: currentFilters,
+                    format: 'excel'
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Export failed');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                
+                const timestamp = new Date().toISOString().slice(0, 10);
+                a.download = `exported_data_${timestamp}.xlsx`;
+                
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            })
+            .catch(error => {
+                console.error('Export error:', error);
+                alert('Error exporting data: ' + error.message);
+            })
+            .finally(() => {
+                hideLoading();
+            });
+        }
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        // Chart update functions (existing code)
         function updateChart(chartType) {
             console.log('=== STARTING CHART UPDATE ===');
             console.log('Chart type:', chartType);
@@ -573,6 +866,10 @@
             document.querySelectorAll('.chart-wrapper').forEach(container => {
                 initializePlotlyCharts(container);
             });
+            
+            // Initialize filters
+            initializeFilters();
+            updatePaginationInfo();
             
             // Additional resize after a delay to ensure everything is rendered
             setTimeout(() => {

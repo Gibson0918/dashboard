@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Flask
+instance/
+.webassets-cache/
+
+# HTML (Generally, HTML files are part of the source code, but you might ignore generated ones)
+# For example, if you generate static HTML files from templates:
+# static_html_output/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# IDE Specific Files (e.g., VS Code, PyCharm)
+.vscode/
+.idea/
+*.iml
+
+# Build Artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs and other temporary files
+*.log
+tmp/
