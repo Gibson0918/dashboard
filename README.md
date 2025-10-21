@@ -29,21 +29,21 @@ pip install flask plotly pandas openpyxl
 ```
 python app.py
 ```
-> Then visit http://localhost:5000
+Then visit http://localhost:5000
 
 #### Mac
-> You need to modify the app.py file first. Change line 775 from:
+You need to modify the app.py file first. Change line 775 from:
 
 ``` app.run(debug=True, host='localhost', port=5000) ```
 
-> to
+to
 
 ``` app.run(debug=True, host='localhost', port=3000) ```
 
 #### Then run:
 ``` python app.py ```
 
-> And visit: http://localhost:3000 or http://localhost:4000
+And visit: http://localhost:3000 or http://localhost:4000
 
 ## Features
 - 📊 Interactive Charts: Bar charts, line charts, pie charts, scatter plots, and heatmaps
